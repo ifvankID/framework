@@ -52,7 +52,7 @@ expressions_fix() {
     echo "$escaped_var"
 }
 
-apply_pif_patches() {
+pif_patches() {
     local unpack_dir="$1"
     
     certificatechainPatch() { certificatechainPatch="
@@ -109,7 +109,7 @@ apply_pif_patches() {
     cat tmp_keystore >> "$keystorespiclassfile"
     rm -rf inst1 inst2 tmp_keystore
 
-    patch_application_package_manager() {
+    package_managerPatch() {
         local FEATURES_FIELDS=".field private static final whitelist featuresAndroid:[Ljava/lang/String;\n.field private static final whitelist featuresNexus:[Ljava/lang/String;\n.field private static final whitelist featuresPixel:[Ljava/lang/String;\n.field private static final whitelist featuresPixelOthers:[Ljava/lang/String;\n.field private static final whitelist featuresTensor:[Ljava/lang/String;"
         sed -i "/# static fields/a ${FEATURES_FIELDS}" "$pm_smali"
         local CODENAME_FIELD=".field private static final whitelist pTensorCodenames:[Ljava/lang/String;"
@@ -393,7 +393,7 @@ EOF
         fi
     }
 
-    patch_application_package_manager
+    package_managerPatch
 
     if [[ -f "PIF/classes.dex" ]]; then 
         baksmali d "PIF/classes.dex" -o classes5
@@ -403,7 +403,7 @@ EOF
     fi
 }
 
-apply_apk_protection_patches() {
+apk_protection_patch() {
     local unpack_dir="$1"
     local sig_verifier_smali=$(find "$unpack_dir" -type f -name 'ApkSignatureVerifier.smali' | head -n 1)
     if [[ -z "$sig_verifier_smali" ]]; then echo -e "${RED}    ERROR: ApkSignatureVerifier.smali not found.${NC}"; return 1; fi
@@ -417,7 +417,7 @@ apply_apk_protection_patches() {
     perl -0777 -i -pe "s#$find_min_sdk#\1\n    .locals 1\n\n    const/4 v0, 0x0\n\n    return v0\n\2#g" "$sig_verifier_smali"
 }
 
-apply_secure_screenshot_patch() {
+secure_screenshot_patch() {
     local unpack_dir="$1"
     local file1=$(grep -lr '\.method isSecureLocked()Z' "$unpack_dir" | grep 'WindowState.smali$' | head -n 1)
     if [[ -n "$file1" ]]; then
@@ -457,7 +457,7 @@ EOF
     fi
 }
 
-apply_mock_location_patch() {
+mock_location_patch() {
     local unpack_dir="$1"
     local file3=$(grep -lr '.method public noteOp(ILandroid/location/util/identity/CallerIdentity;)Z' "$unpack_dir" | grep 'SystemAppOpsHelper.smali$' | head -n 1)
     if [[ -n "$file3" ]]; then
@@ -529,7 +529,7 @@ framework_menu() {
     local apk_protection_patched=false
     local invoke_custom_patched=false
 
-    _ensure_unpacked() {
+    ensure_unpacked() {
         if [[ "$is_unpacked" = true ]]; then return 0; fi
         echo ""
         rm -rf ifvank "$framework_name" framework-patched.apk *.bak > /dev/null 2>&1
@@ -569,19 +569,19 @@ framework_menu() {
         read -p "Enter the number: " sub_choice
         case $sub_choice in
             1)
-                _ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
-                apply_pif_patches "ifvank"
+                ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
+                pif_patches "ifvank"
                 patches_applied=true; pif_patched=true
                 echo -e "\n   ${GREEN}Patch 'Play Integrity Fix' applied.${NC}"; sleep 2
                 ;;
             2)
-                _ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
-                apply_apk_protection_patches "ifvank"
+                ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
+                apk_protection_patch "ifvank"
                 patches_applied=true; apk_protection_patched=true
                 echo -e "\n   ${GREEN}Patch 'Remove APK Protection' applied.${NC}"; sleep 2
                 ;;
             3)
-                _ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
+                ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
                 remove_invoke_custom "ifvank"
                 patches_applied=true; invoke_custom_patched=true
                 echo -e "\n   ${GREEN}Patch 'Remove Invoke-Custom' applied.${NC}"; sleep 2
@@ -592,7 +592,6 @@ framework_menu() {
                     echo -e "\nNo patches were applied. Nothing to repack."; sleep 2; continue
                 fi
                 repack_framework() {
-                    # Sembunyikan output lagi setelah kita yakin berhasil
                     apkeditor b -i ifvank -o framework-patched.apk > /dev/null 2>&1
                     [[ ! -f "framework-patched.apk" ]] && return 1
                     mv framework-patched.apk "$source_file"; return $?
@@ -622,7 +621,7 @@ services_menu() {
     local mock_location_patched=false
     local invoke_custom_patched=false
 
-    _ensure_unpacked() {
+    ensure_unpacked() {
         if [[ "$is_unpacked" = true ]]; then return 0; fi
         echo ""
         rm -rf ifvank "$services_name" services-patched.apk *.bak > /dev/null 2>&1
@@ -662,17 +661,17 @@ services_menu() {
         read -p "Enter the number: " sub_choice
         case $sub_choice in
             1)
-                _ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
-                apply_secure_screenshot_patch "ifvank"; patches_applied=true; secure_screenshot_patched=true
+                ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
+                secure_screenshot_patch "ifvank"; patches_applied=true; secure_screenshot_patched=true
                 echo -e "\n   ${GREEN}Patch 'Disable Secure Screenshot' applied.${NC}"; sleep 2
                 ;;
             2)
-                _ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
-                apply_mock_location_patch "ifvank"; patches_applied=true; mock_location_patched=true
+                ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
+                mock_location_patch "ifvank"; patches_applied=true; mock_location_patched=true
                 echo -e "\n   ${GREEN}Patch 'Bypass Mock Location' applied.${NC}"; sleep 2
                 ;;
             3)
-                _ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
+                ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
                 remove_invoke_custom "ifvank"; patches_applied=true; invoke_custom_patched=true
                 echo -e "\n   ${GREEN}Patch 'Remove Invoke-Custom' applied.${NC}"; sleep 2
                 ;;
@@ -718,11 +717,11 @@ patch_both() {
         if [[ ! -d "ifvank" ]]; then
             echo -e "${RED}ERROR: Failed to unpack $framework_name. Aborting patch.${NC}"; rm -rf "$framework_name"
         else
-            _apply_all_framework_patches() {
-                apply_pif_patches "ifvank"
-                apply_apk_protection_patches "ifvank"
+            apply_all_framework_patches() {
+                pif_patches "ifvank"
+                apk_protection_patch "ifvank"
             }
-            run_with_spinner "Patching framework.jar..." _apply_all_framework_patches
+            run_with_spinner "Patching framework.jar..." apply_all_framework_patches
             repack_fw() {
                 apkeditor b -i ifvank -o "${framework_name%.jar}-patched.apk" > /dev/null 2>&1
                 [[ ! -f "${framework_name%.jar}-patched.apk" ]] && return 1
@@ -745,11 +744,11 @@ patch_both() {
         if [ ! -d "ifvank" ]; then
             echo -e "${RED}ERROR: Failed to unpack $services_name. Aborting patch.${NC}"; rm -rf "$services_name"
         else
-            _apply_all_services_patches() {
-                apply_secure_screenshot_patch "ifvank"
-                apply_mock_location_patch "ifvank"
+            apply_all_services_patches() {
+                secure_screenshot_patch "ifvank"
+                mock_location_patch "ifvank"
             }
-            run_with_spinner "Patching services.jar..." _apply_all_services_patches
+            run_with_spinner "Patching services.jar..." apply_all_services_patches
             repack_sv() {
                 apkeditor b -i ifvank -o "${services_name%.jar}-patched.apk" > /dev/null 2>&1
                 [[ ! -f "${services_name%.jar}-patched.apk" ]] && return 1
