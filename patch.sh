@@ -403,19 +403,20 @@ EOF
     fi
 }
 
-apk_protection_patch() {
+apk_protection_patches() {
     local unpack_dir="$1"
     local sig_verifier_smali=$(find "$unpack_dir" -type f -name 'ApkSignatureVerifier.smali' | head -n 1)
     if [[ -z "$sig_verifier_smali" ]]; then echo -e "${RED}    ERROR: ApkSignatureVerifier.smali not found.${NC}"; return 1; fi
     local find_v3='(invoke-static\s*\{[^,]+,\s*[^,]+,\s*[^,]+,\s*([v|p]\d+)[^}]*\}, Landroid/util/apk/ApkSignatureVerifier;->verifyV3AndBelowSignatures\(Landroid/content/pm/parsing/result/ParseInput;Ljava/lang/String;IZ\)Landroid/content/pm/parsing/result/ParseResult;)'
-    local replace_v3="const/4 \\\\2, 0x0\n    \\\\1"
-    perl -i -pe "s#$find_v3#$replace_v3#" "$sig_verifier_smali"
+    local replace_v3="const/4 \\2, 0x0\n    \\1"
+    perl -i'' -pe "s#$find_v3#$replace_v3#" "$sig_verifier_smali"
     local find_v4='(invoke-static\s*\{[^,]+,\s*[^,]+,\s*[^,]+,\s*([v|p]\d+)[^}]*\}, Landroid/util/apk/ApkSignatureVerifier;->verifyV4Signature\(Landroid/content/pm/parsing/result/ParseInput;Ljava/lang/String;IZ\)Landroid/content/pm/parsing/result/ParseResult;)'
-    local replace_v4="const/4 \\\\2, 0x0\n    \\\\1"
-    perl -i -pe "s#$find_v4#$replace_v4#" "$sig_verifier_smali"
+    local replace_v4="const/4 \\2, 0x0\n    \\1"
+    perl -i'' -pe "s#$find_v4#$replace_v4#" "$sig_verifier_smali"
     local find_min_sdk='(\.method\s*public\s*static\s*blacklist\s*getMinimumSignatureSchemeVersionForTargetSdk\(I\)I)[\s\S]+?(\.end method)'
-    perl -0777 -i -pe "s#$find_min_sdk#\1\n    .locals 1\n\n    const/4 v0, 0x0\n\n    return v0\n\2#g" "$sig_verifier_smali"
+    perl -0777 -i'' -pe "s#$find_min_sdk#\1\n    .locals 1\n\n    const/4 v0, 0x0\n\n    return v0\n\2#g" "$sig_verifier_smali"
 }
+
 
 secure_screenshot_patch() {
     local unpack_dir="$1"
@@ -436,7 +437,7 @@ secure_screenshot_patch() {
     :cond_continue_secure_check
 EOF
         local ESCAPED_CODE=$(echo "$INJECTION_CODE" | sed 's/^[ \t]*//; s/[ \t]*$//' | sed -E ':a;N;$!ba;s/\n/\\n/g')
-        sed -i "${TARGET_LINE}a\\\\${ESCAPED_CODE}" "$file1"
+        sed -i'' "${TARGET_LINE}a\\${ESCAPED_CODE}" "$file1"
     fi
     local file2=$(grep -lr '\.method public notifyScreenshotListeners(I)Ljava/util/List;' "$unpack_dir" | grep 'WindowManagerService.smali$' | head -n 1)
     if [[ -n "$file2" ]]; then
@@ -453,7 +454,7 @@ EOF
     :cond_continue_notify_check
 EOF
         export FIND_REGEX REPLACE_TEXT
-        perl -0777 -i -pe 's/$ENV{FIND_REGEX}/"$1\n" . $ENV{REPLACE_TEXT}/se' "$file2"
+        perl -0777 -i'' -pe 's/$ENV{FIND_REGEX}/"$1\n" . $ENV{REPLACE_TEXT}/se' "$file2"
     fi
 }
 
@@ -576,7 +577,7 @@ framework_menu() {
                 ;;
             2)
                 ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
-                apk_protection_patch "ifvank"
+                apk_protection_patches "ifvank"
                 patches_applied=true; apk_protection_patched=true
                 echo -e "\n   ${GREEN}Patch 'Remove APK Protection' applied.${NC}"; sleep 2
                 ;;
@@ -719,7 +720,7 @@ patch_both() {
         else
             apply_all_framework_patches() {
                 pif_patches "ifvank"
-                apk_protection_patch "ifvank"
+                apk_protection_patches "ifvank"
             }
             run_with_spinner "Patching framework.jar..." apply_all_framework_patches
             repack_fw() {
