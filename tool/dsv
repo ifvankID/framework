@@ -20,7 +20,7 @@ run_with_spinner() {
     shift
     "$@" &
     local PID=$!
-    local spin='⣾⣽⣻⢿⡿⣟⣯p'
+    local spin='⣾⣽⣻⢿⡿⣟⣯⣷'
     local i=0
     while kill -0 $PID 2>/dev/null; do
         i=$(( (i+1) % 8 ))
@@ -29,7 +29,7 @@ run_with_spinner() {
     done
     wait $PID
     if [ $? -eq 0 ]; then
-        printf "\r[*] %s [${GREEN}✓${NC}]\n" "$message"
+        printf "\r[*] %s [✓]\n" "$message"
         return 0
     else
         printf "\r[*] %s [${RED}✗${NC}]\n" "$message"
