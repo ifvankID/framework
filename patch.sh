@@ -773,10 +773,12 @@ main_menu() {
     echo "  1. Patch framework.jar"
     echo "  2. Patch services.jar"
     echo "  3. Patch Both (Auto)"
+    echo "  4. Disable Signature Verification"
     echo "  0. Exit"
     echo ""
-    read -p "Enter the number: " choice
+    read -p "Choose an option: " choice
 }
+
 
 while true; do
     main_menu
@@ -786,9 +788,29 @@ while true; do
         3)
             patch_both
             echo ""
-            read -p "   Process complete. Press Enter to return to the menu..."
+            read -p "   Press [Enter] ..."
             ;;
-        0) echo "Exiting!"; exit 0 ;;
-        *) echo "Invalid number, please try again."; sleep 2 ;;
+        4)
+            dsv_path="./tool/dsv"
+            if [[ -f "$dsv_path" ]]; then
+                echo "--> Running $dsv_path..."
+                chmod +x "$dsv_path" 
+                bash "$dsv_path"
+                echo ""
+                read -p "   Press [Enter]..."
+            else
+                echo ""
+                echo -e "${RED}ERROR: Whoops! Can't find $dsv_path!${NC}"
+                sleep 2
+            fi
+            ;;
+        0) 
+            echo "Exit!"
+            exit 0
+            ;;
+        *) 
+            echo "Invalid option, try again."
+            sleep 2
+            ;;
     esac
 done
