@@ -1,0 +1,11 @@
+# ifvank Props
+persist.sys.ifvankprops.pif=true
+persist.sys.ifvankprops.keybox=true
+persist.sys.ifvankprops.pixelprops=false
+persist.sys.ifvankprops.photos=true
+persist.sys.ifvankprops.games=false
+persist.sys.ifvankprops.snapchat=true
+persist.sys.ifvankprops.recent=false
+persist.sys.ifvankprops.recent.all=false
+persist.sys.ifvankprops.spoofastab=false
+ro.oplus_ifvank.device=alioth
