@@ -773,7 +773,7 @@ main_menu() {
     echo "  1. Patch framework.jar"
     echo "  2. Patch services.jar"
     echo "  3. Patch Both (Auto)"
-    echo "  4. Disable Signature Verification (soon)"
+    echo "  4. Disable Signature Verification"
     echo "  0. Exit"
     echo ""
     read -p "Choose an option: " choice
