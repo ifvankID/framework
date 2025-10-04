@@ -417,7 +417,6 @@ apk_protection_patches() {
     perl -0777 -i'' -pe "s#$find_min_sdk#\1\n    .locals 1\n\n    const/4 v0, 0x0\n\n    return v0\n\2#g" "$sig_verifier_smali"
 }
 
-
 secure_screenshot_patch() {
     local unpack_dir="$1"
     local file1=$(grep -lr '\.method isSecureLocked()Z' "$unpack_dir" | grep 'WindowState.smali$' | head -n 1)
@@ -567,7 +566,7 @@ framework_menu() {
         echo "  4. Repack & Save Changes"
         echo "  0. Back (Discard Changes)"
         echo ""
-        read -p "Enter the number: " sub_choice
+        read -p "Select an option: " sub_choice
         case $sub_choice in
             1)
                 ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
@@ -592,11 +591,12 @@ framework_menu() {
                 if [[ "$patches_applied" = false ]]; then
                     echo -e "\nNo patches were applied. Nothing to repack."; sleep 2; continue
                 fi
-                repack_framework() {
-                    apkeditor b -i ifvank -o framework-patched.apk > /dev/null 2>&1
-                    [[ ! -f "framework-patched.apk" ]] && return 1
-                    mv framework-patched.apk "$source_file"; return $?
-                }
+repack_framework() {
+    apkeditor b -i ifvank -o framework-patched.apk > /dev/null 2>&1
+    [[ ! -f "framework-patched.apk" ]] && return 1
+    mv -f "framework-patched.apk" "$sdcard_path/${framework_name%.jar}-patched.jar"
+    return $?
+}
                 echo ""
                 run_with_spinner "Repacking framework.jar..." repack_framework
                 if [[ $? -eq 0 ]]; then echo "[✓] framework.jar patched successfully!"; echo -e "${GREEN}Output: $source_file${NC}"; else echo -e "${RED}ERROR: Failed to repack framework.jar.${NC}"; fi
@@ -608,7 +608,7 @@ framework_menu() {
                 if [[ "$is_unpacked" = true ]]; then echo "Discarding changes..."; rm -rf "$framework_name" ifvank; fi
                 return
                 ;;
-            *) echo "Invalid number."; sleep 2 ;;
+            *) echo "Invalid option."; sleep 2 ;;
         esac
     done
 }
@@ -659,7 +659,7 @@ services_menu() {
         echo "  4. Repack & Save Changes"
         echo "  0. Back (Discard Changes)"
         echo ""
-        read -p "Enter the number: " sub_choice
+        read -p "Select an option: " sub_choice
         case $sub_choice in
             1)
                 ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
@@ -680,11 +680,13 @@ services_menu() {
                 if [[ "$patches_applied" = false ]]; then
                     echo -e "\nNo patches were applied. Nothing to repack."; sleep 2; continue
                 fi
-                repack_services() {
-                    apkeditor b -i ifvank -o services-patched.apk > /dev/null 2>&1
-                    [[ ! -f "services-patched.apk" ]] && return 1
-                    mv services-patched.apk "$source_file"; return $?
-                }
+                
+repack_services() {
+    apkeditor b -i ifvank -o services-patched.apk > /dev/null 2>&1
+    [[ ! -f "services-patched.apk" ]] && return 1
+    mv -f "services-patched.apk" "$sdcard_path/${services_name%.jar}-patched.jar"
+    return $?
+}
                 echo ""
                 run_with_spinner "Repacking $services_name..." repack_services
                 if [[ $? -eq 0 ]]; then echo "[✓] services.jar patched successfully!"; echo -e "${GREEN}Output: $source_file${NC}"; else echo -e "${RED}ERROR: Failed to repack.${NC}"; fi
@@ -696,7 +698,7 @@ services_menu() {
                 if [[ "$is_unpacked" = true ]]; then echo "Discarding changes..."; rm -rf "$services_name" ifvank; fi
                 return
                 ;;
-            *) echo "Invalid number."; sleep 2 ;;
+            *) echo "Invalid option."; sleep 2 ;;
         esac
     done
 }
@@ -723,13 +725,14 @@ patch_both() {
                 apk_protection_patches "ifvank"
             }
             run_with_spinner "Patching framework.jar..." apply_all_framework_patches
-            repack_fw() {
-                apkeditor b -i ifvank -o "${framework_name%.jar}-patched.apk" > /dev/null 2>&1
-                [[ ! -f "${framework_name%.jar}-patched.apk" ]] && return 1
-                mv "${framework_name%.jar}-patched.apk" "$source_file_fw"; return $?
-            }
+repack_fw() {
+    apkeditor b -i ifvank -o "${framework_name%.jar}-patched.apk" > /dev/null 2>&1
+    [[ ! -f "${framework_name%.jar}-patched.apk" ]] && return 1
+    mv -f "${framework_name%.jar}-patched.apk" "$sdcard_path/${framework_name%.jar}-patched.jar"
+    return $?
+}
             run_with_spinner "Repacking $framework_name..." repack_fw
-            if [[ $? -eq 0 ]]; then echo "[✓] framework.jar patched successfully!"; echo -e "${GREEN} Output: /sdcard/framework.jar${NC}"; else echo -e "${RED}ERROR: Failed to repack framework.jar.${NC}"; fi
+            if [[ $? -eq 0 ]]; then echo "[✓] framework.jar patched successfully!"; echo -e "${GREEN} Output: /sdcard/framework-patched.jar${NC}"; else echo -e "${RED}ERROR: Failed to repack framework.jar.${NC}"; fi
         fi
         rm -rf "$framework_name" ifvank
     fi
@@ -750,13 +753,14 @@ patch_both() {
                 mock_location_patch "ifvank"
             }
             run_with_spinner "Patching services.jar..." apply_all_services_patches
-            repack_sv() {
-                apkeditor b -i ifvank -o "${services_name%.jar}-patched.apk" > /dev/null 2>&1
-                [[ ! -f "${services_name%.jar}-patched.apk" ]] && return 1
-                mv "${services_name%.jar}-patched.apk" "$source_file_sv"; return $?
-            }
+repack_sv() {
+    apkeditor b -i ifvank -o "${services_name%.jar}-patched.apk" > /dev/null 2>&1
+    [[ ! -f "${services_name%.jar}-patched.apk" ]] && return 1
+    mv -f "${services_name%.jar}-patched.apk" "$sdcard_path/${services_name%.jar}-patched.jar"
+    return $?
+}
             run_with_spinner "Repacking $services_name..." repack_sv
-            if [[ $? -eq 0 ]]; then echo "[✓] services.jar patched successfully!"; echo -e "${GREEN} Output: /sdcard/services.jar${NC}"; else echo -e "${RED}ERROR: Failed to repack services.jar.${NC}"; fi
+            if [[ $? -eq 0 ]]; then echo "[✓] services.jar patched successfully!"; echo -e "${GREEN} Output: /sdcard/services-patched.jar${NC}"; else echo -e "${RED}ERROR: Failed to repack services.jar.${NC}"; fi
         fi
         rm -rf "$services_name" ifvank
     fi
@@ -776,9 +780,8 @@ main_menu() {
     echo "  4. Disable Signature Verification"
     echo "  0. Exit"
     echo ""
-    read -p "Choose an option: " choice
+    read -p "Select an option: " choice
 }
-
 
 while true; do
     main_menu
@@ -791,18 +794,56 @@ while true; do
             read -p "   Press [Enter] ..."
             ;;
         4)
-            dsv_path="./tool/dsv"
-            if [[ -f "$dsv_path" ]]; then
-                echo "--> Running $dsv_path..."
-                chmod +x "$dsv_path" 
-                bash "$dsv_path"
+            # Loop for the sub-menu
+            while true; do
+                clear
+                echo "=========================================="
+                echo -e "      ${GREEN}Disable Signature Verification${NC}"
+                echo "=========================================="
+                echo " 1. Android 13-14"
+                echo " 2. Android 15"
+                echo " 0. Main Menu"
                 echo ""
-                read -p "   Press [Enter]..."
-            else
-                echo ""
-                echo -e "${RED}ERROR: Whoops! Can't find $dsv_path!${NC}"
-                sleep 2
-            fi
+                read -p "   Select an option: " sub_choice
+
+                case $sub_choice in
+                    1)
+                        dsv_path="./tool/dsv13-14"
+                        if [[ -f "$dsv_path" ]]; then
+                            chmod +x "$dsv_path" 
+                            bash "$dsv_path"
+                            echo ""
+                            read -p "   Done. Press [Enter] to return..."
+                        else
+                            echo ""
+                            echo -e "${RED}ERROR: Patcher file $dsv_path not found!${NC}"
+                            sleep 2
+                        fi
+                        ;;
+                    2)
+                        dsv_path="./tool/dsv15"
+                        if [[ -f "$dsv_path" ]]; then
+                            chmod +x "$dsv_path" 
+                            bash "$dsv_path"
+                            echo ""
+                            read -p "   Done. Press [Enter] to return..."
+                        else
+                            echo ""
+                            echo -e "${RED}ERROR: Patcher file $dsv_path not found!${NC}"
+                            sleep 2
+                        fi
+                        ;;
+                    0)
+                        # Breaks out of the sub-menu loop
+                        break
+                        ;;
+                    *)
+                        echo ""
+                        echo -e "${RED}Invalid option! Please try again.${NC}"
+                        sleep 2
+                        ;;
+                esac
+            done
             ;;
         0) 
             echo "Exit!"
