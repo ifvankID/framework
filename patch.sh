@@ -695,6 +695,7 @@ patch_both() {
     local source_file_fw="$sdcard_path/$framework_name"
     echo ""
     rm -rf ifvank "$framework_name" "${framework_name%.jar}-patched.apk" *.bak > /dev/null 2>&1
+    rm -rf ifvank "$services_name" services-patched.apk *.bak > /dev/null 2>&1
     if [[ ! -f "$source_file_fw" ]]; then
         echo -e "${RED}ERROR: $framework_name not found. Skipping.${NC}"
     else
