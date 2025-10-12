@@ -27,6 +27,17 @@ baksmali() {
     java -jar "$jarfile" "$@" > /dev/null 2>&1
 }
 
+# TAMBAHKAN FUNGSI BARU INI
+apktool() {
+    local jarfile=$work_dir/tool/apktool.jar
+    if [[ ! -f "$jarfile" ]]; then
+        echo -e "${RED}ERROR: apktool.jar not found in tool/ folder!${NC}"
+        return 1
+    fi
+    # Pastikan Anda sudah menyesuaikan alokasi memori (-Xmx)
+    java -Xmx2048M -jar "$jarfile" "$@"
+}
+
 run_with_spinner() {
     local message="$1"
     shift
@@ -417,78 +428,25 @@ apk_protection_patches() {
     perl -0777 -i'' -pe "s#$find_min_sdk#\1\n    .locals 1\n\n    const/4 v0, 0x0\n\n    return v0\n\2#g" "$sig_verifier_smali"
 }
 
-secure_screenshot_patch() {
-    local unpack_dir="$1"
-    local file1=$(grep -lr '\.method isSecureLocked()Z' "$unpack_dir" | grep 'WindowState.smali$' | head -n 1)
-    if [[ -n "$file1" ]]; then
-        local BLOCK_START_LINE=$(grep -n '\.method isSecureLocked()Z' "$file1" | cut -d: -f1)
-        local INJECT_LINE=$(tail -n +$BLOCK_START_LINE "$file1" | grep -n -E '\.registers\s+[0-9]+' | head -n 1 | cut -d: -f1)
-        local TARGET_LINE=$((BLOCK_START_LINE + INJECT_LINE))
-        read -r -d '' INJECTION_CODE <<'EOF'
-
-    const-string/jumbo v0, "persist.sys.oplus.dfs"
-    const/4 v1, 0x0
-    invoke-static {v0, v1}, Landroid/os/SystemProperties;->getBoolean(Ljava/lang/String;Z)Z
-    move-result v0
-    if-eqz v0, :cond_continue_secure_check
-    const/4 v0, 0x0
-    return v0
-    :cond_continue_secure_check
-EOF
-        local ESCAPED_CODE=$(echo "$INJECTION_CODE" | sed 's/^[ \t]*//; s/[ \t]*$//' | sed -E ':a;N;$!ba;s/\n/\\n/g')
-        sed -i'' "${TARGET_LINE}a\\${ESCAPED_CODE}" "$file1"
-    fi
-    local file2=$(grep -lr '\.method public notifyScreenshotListeners(I)Ljava/util/List;' "$unpack_dir" | grep 'WindowManagerService.smali$' | head -n 1)
-    if [[ -n "$file2" ]]; then
-        local FIND_REGEX='(\.method public notifyScreenshotListeners\(I\)Ljava\/util\/List;[\s\S]*?\.end annotation)'
-        read -r -d '' REPLACE_TEXT <<'EOF'
-    const-string/jumbo v0, "persist.sys.oplus.dfs"
-    const/4 v1, 0x0
-    invoke-static {v0, v1}, Landroid/os/SystemProperties;->getBoolean(Ljava/lang/String;Z)Z
-    move-result v0
-    if-eqz v0, :cond_continue_notify_check
-    new-instance v0, Ljava/util/ArrayList;
-    invoke-direct {v0}, Ljava/util/ArrayList;-><init>()V
-    return-object v0
-    :cond_continue_notify_check
-EOF
-        export FIND_REGEX REPLACE_TEXT
-        perl -0777 -i'' -pe 's/$ENV{FIND_REGEX}/"$1\n" . $ENV{REPLACE_TEXT}/se' "$file2"
-    fi
-}
-
 mock_location_patch() {
     local unpack_dir="$1"
+
     local file3=$(grep -lr '.method public noteOp(ILandroid/location/util/identity/CallerIdentity;)Z' "$unpack_dir" | grep 'SystemAppOpsHelper.smali$' | head -n 1)
     if [[ -n "$file3" ]]; then
         local FIND_REGEX='(\.method public noteOp\(ILandroid\/location\/util\/identity\/CallerIdentity;\)Z[\s\S]*?\.param p2, "callerIdentity"[\s\S]*?;)'
         read -r -d '' REPLACE_TEXT <<'EOF'
-    const-string/jumbo v0, "persist.sys.oplus.mocklocation"
-    const/4 v1, 0x0
-    invoke-static {v0, v1}, Landroid/os/SystemProperties;->getBoolean(Ljava/lang/String;Z)Z
-    move-result v0
-    if-eqz v0, :cond_continue_noteOp_check
-    const/4 v0, 1
+    const/4 v0, 0x1
     return v0
-    :cond_continue_noteOp_check
 EOF
         export FIND_REGEX REPLACE_TEXT
         perl -0777 -i -pe 's/$ENV{FIND_REGEX}/"$1\n" . $ENV{REPLACE_TEXT}/se' "$file3"
     fi
+
     local file4=$(grep -lr 'Landroid/location/Location;->setIsFromMockProvider(Z)V' "$unpack_dir" | grep 'MockLocationProvider.smali$' | head -n 1)
     if [[ -n "$file4" ]]; then
         local FIND_REGEX='(const\/4 v1, 0x1\s*invoke-virtual \{v0, v1\}, Landroid\/location\/Location;->setIsFromMockProvider\(Z\)V)'
         read -r -d '' REPLACE_TEXT <<'EOF'
-    const-string/jumbo v1, "persist.sys.oplus.mocklocation"
-    const/4 v2, 0x0
-    invoke-static {v1, v2}, Landroid/os/SystemProperties;->getBoolean(Ljava/lang/String;Z)Z
-    move-result v1
-    if-nez v1, :cond_set_mock_false
-    const/4 v1, 0x1
-    goto :goto_set_flag
-    :cond_set_mock_false
     const/4 v1, 0x0
-    :goto_set_flag
     invoke-virtual {v0, v1}, Landroid/location/Location;->setIsFromMockProvider(Z)V
 EOF
         export FIND_REGEX REPLACE_TEXT
@@ -520,6 +478,22 @@ remove_invoke_custom() {
     done
 }
 
+# GANTI FUNGSI LAMA DENGAN VERSI EKSPERIMENTAL INI
+remove_debug_info_files() {
+    local unpack_dir="$1"
+    if [[ ! -d "$unpack_dir" ]]; then return 1; fi
+
+    echo ""
+    # Regex diperbarui untuk menyertakan .local (SANGAT BERISIKO GAGAL)
+    local perl_command="find \"$unpack_dir\" -name \"*.smali\" -type f -exec perl -i -ne 'print unless /^\s*\\.(line|source|param)/' {} +"
+   
+        bash -c "$perl_command"
+    
+    return $?
+}
+
+
+# GANTI FUNGSI LAMA DENGAN VERSI LENGKAP INI
 framework_menu() {
     local framework_name="framework.jar"
     local source_file="$sdcard_path/$framework_name"
@@ -528,6 +502,7 @@ framework_menu() {
     local pif_patched=false
     local apk_protection_patched=false
     local invoke_custom_patched=false
+    local debug_info_removed=false # Status baru
 
     ensure_unpacked() {
         if [[ "$is_unpacked" = true ]]; then return 0; fi
@@ -563,7 +538,11 @@ framework_menu() {
         if [[ "$invoke_custom_patched" = true ]]; then check3=" ${GREEN}✓${NC}"; fi
         echo -e "  3. Remove Invoke-Custom$check3"
         
-        echo "  4. Repack & Save Changes"
+        local check4=""
+        if [[ "$debug_info_removed" = true ]]; then check4=" ${GREEN}✓${NC}"; fi
+        echo -e "  4. Remove Debug Info$check4"
+
+        echo "  5. Repack & Save Changes"
         echo "  0. Back (Discard Changes)"
         echo ""
         read -p "Select an option: " sub_choice
@@ -586,20 +565,35 @@ framework_menu() {
                 patches_applied=true; invoke_custom_patched=true
                 echo -e "\n   ${GREEN}Patch 'Remove Invoke-Custom' applied.${NC}"; sleep 2
                 ;;
-
-            4)
+            4) 
+                ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
+                remove_debug_info_files "ifvank"
+                debug_info_removed=true
+                patches_applied=true
+                echo -e "\n   ${GREEN}Info debug dari file smali telah dihapus.${NC}"; sleep 2
+                ;;
+            5) 
                 if [[ "$patches_applied" = false ]]; then
                     echo -e "\nNo patches were applied. Nothing to repack."; sleep 2; continue
                 fi
-repack_framework() {
-    apkeditor b -i ifvank -o framework-patched.apk > /dev/null 2>&1
-    [[ ! -f "framework-patched.apk" ]] && return 1
-    mv -f "framework-patched.apk" "$sdcard_path/${framework_name%.jar}-patched.jar"
-    return $?
-}
+                
+                repack_framework() {
+                    # Repack biasa tanpa flag -nd
+                    apkeditor b -i ifvank -o framework-patched.apk > /dev/null 2>&1
+                    [[ ! -f "framework-patched.apk" ]] && return 1
+                    mv -f "framework-patched.apk" "$sdcard_path/${framework_name%.jar}-patched.jar"
+                    return $?
+                }
+                
                 echo ""
                 run_with_spinner "Repacking framework.jar..." repack_framework
-                if [[ $? -eq 0 ]]; then echo "[✓] framework.jar patched successfully!"; echo -e "${GREEN}Output: $source_file${NC}"; else echo -e "${RED}ERROR: Failed to repack framework.jar.${NC}"; fi
+                
+                if [[ $? -eq 0 ]]; then 
+                    echo "[✓] framework.jar patched successfully!"
+                    echo -e "${GREEN}Output: $sdcard_path/${framework_name%.jar}-patched.jar${NC}"
+                else 
+                    echo -e "${RED}ERROR: Failed to repack framework.jar.${NC}"
+                fi
                 rm -rf "$framework_name" ifvank framework-patched.apk
                 read -p "   Press Enter to continue..."
                 return
@@ -612,13 +606,11 @@ repack_framework() {
         esac
     done
 }
-
 services_menu() {
     local services_name="services.jar"
     local source_file="$sdcard_path/$services_name"
     local is_unpacked=false
     local patches_applied=false
-    local secure_screenshot_patched=false
     local mock_location_patched=false
     local invoke_custom_patched=false
 
@@ -643,40 +635,31 @@ services_menu() {
         echo -e "${GREEN}        services.jar Patcher${NC}"
         echo "====================================="
         echo ""
-                
+        
         local check1=""
-        if [[ "$secure_screenshot_patched" = true ]]; then check1=" ${GREEN}✓${NC}"; fi
-        echo -e "  1. Disable Secure Screenshot$check1"
+        if [[ "$mock_location_patched" = true ]]; then check1=" ${GREEN}✓${NC}"; fi
+        echo -e "  1. Bypass Mock Location$check1"
         
         local check2=""
-        if [[ "$mock_location_patched" = true ]]; then check2=" ${GREEN}✓${NC}"; fi
-        echo -e "  2. Bypass Mock Location$check2"
+        if [[ "$invoke_custom_patched" = true ]]; then check2=" ${GREEN}✓${NC}"; fi
+        echo -e "  2. Remove Invoke-Custom$check2"
         
-        local check3=""
-        if [[ "$invoke_custom_patched" = true ]]; then check3=" ${GREEN}✓${NC}"; fi
-        echo -e "  3. Remove Invoke-Custom$check3"
-        
-        echo "  4. Repack & Save Changes"
+        echo "  3. Repack & Save Changes"
         echo "  0. Back (Discard Changes)"
         echo ""
         read -p "Select an option: " sub_choice
         case $sub_choice in
             1)
                 ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
-                secure_screenshot_patch "ifvank"; patches_applied=true; secure_screenshot_patched=true
-                echo -e "\n   ${GREEN}Patch 'Disable Secure Screenshot' applied.${NC}"; sleep 2
-                ;;
-            2)
-                ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
                 mock_location_patch "ifvank"; patches_applied=true; mock_location_patched=true
                 echo -e "\n   ${GREEN}Patch 'Bypass Mock Location' applied.${NC}"; sleep 2
                 ;;
-            3)
+            2)
                 ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
                 remove_invoke_custom "ifvank"; patches_applied=true; invoke_custom_patched=true
                 echo -e "\n   ${GREEN}Patch 'Remove Invoke-Custom' applied.${NC}"; sleep 2
                 ;;
-            4)
+            3)
                 if [[ "$patches_applied" = false ]]; then
                     echo -e "\nNo patches were applied. Nothing to repack."; sleep 2; continue
                 fi
@@ -723,6 +706,8 @@ patch_both() {
             apply_all_framework_patches() {
                 pif_patches "ifvank"
                 apk_protection_patches "ifvank"
+                remove_invoke_custom "ifvank"
+                remove_debug_info_files "ifvank"
             }
             run_with_spinner "Patching framework.jar..." apply_all_framework_patches
 repack_fw() {
@@ -749,8 +734,8 @@ repack_fw() {
             echo -e "${RED}ERROR: Failed to unpack $services_name. Aborting patch.${NC}"; rm -rf "$services_name"
         else
             apply_all_services_patches() {
-                secure_screenshot_patch "ifvank"
                 mock_location_patch "ifvank"
+                remove_invoke_custom "ifvank"
             }
             run_with_spinner "Patching services.jar..." apply_all_services_patches
 repack_sv() {
@@ -778,6 +763,7 @@ main_menu() {
     echo "  2. Patch services.jar"
     echo "  3. Patch Both (Auto)"
     echo "  4. Disable Signature Verification"
+    echo "  5. Disable Flag Secure"
     echo "  0. Exit"
     echo ""
     read -p "Select an option: " choice
@@ -801,7 +787,7 @@ while true; do
                 echo -e "      ${GREEN}Disable Signature Verification${NC}"
                 echo "=========================================="
                 echo " 1. Android 13-14"
-                echo " 2. Android 15"
+                echo " 2. Android 15-16"
                 echo " 0. Main Menu"
                 echo ""
                 read -p "   Select an option: " sub_choice
@@ -845,6 +831,19 @@ while true; do
                 esac
             done
             ;;
+        5) 
+            dfs_path="./tool/dfs"
+                        if [[ -f "$dfs_path" ]]; then
+                            chmod +x "$dfs_path" 
+                            bash "$dfs_path"
+                            echo ""
+                            read -p "   Done. Press [Enter] to return..."
+                        else
+                            echo ""
+                            echo -e "${RED}ERROR: Patcher file $dfs_path not found!${NC}"
+                            sleep 2
+                        fi
+                        ;;
         0) 
             echo "Exit!"
             exit 0
