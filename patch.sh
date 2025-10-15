@@ -27,14 +27,12 @@ baksmali() {
     java -jar "$jarfile" "$@" > /dev/null 2>&1
 }
 
-# TAMBAHKAN FUNGSI BARU INI
 apktool() {
     local jarfile=$work_dir/tool/apktool.jar
     if [[ ! -f "$jarfile" ]]; then
         echo -e "${RED}ERROR: apktool.jar not found in tool/ folder!${NC}"
         return 1
     fi
-    # Pastikan Anda sudah menyesuaikan alokasi memori (-Xmx)
     java -Xmx2048M -jar "$jarfile" "$@"
 }
 
@@ -414,6 +412,41 @@ EOF
     fi
 }
 
+remove_invoke_custom() {
+    local unpack_dir="$1"
+    if [[ ! -d "$unpack_dir" ]]; then
+        echo -e "${RED}    ERROR: Direktori '$unpack_dir' tidak ditemukan.${NC}" >&2
+        return 1
+    fi
+    local target_files
+    target_files=$(grep -Rl "invoke-custom" "$unpack_dir" --include="*.smali")
+    if [[ -z "$target_files" ]]; then
+        return 0
+    fi
+    local find_equals='(\.method[^\n]*? equals\(Ljava/lang/Object;\)Z)[\s\S]*?invoke-custom[\s\S]*?(\.end method)'
+    local replace_equals='\1\n    .registers 2\n    const/4 v0, 0x0\n    return v0\n\2'
+    local find_hashcode='(\.method[^\n]*? hashCode\(\)I)[\s\S]*?invoke-custom[\s\S]*?(\.end method)'
+    local replace_hashcode='\1\n    .registers 2\n    const/4 v0, 0x0\n    return v0\n\2'
+    local find_tostring='(\.method[^\n]*? toString\(\)Ljava/lang/String;)[\s\S]*?invoke-custom[\s\S]*?(\.end method)'
+    local replace_tostring='\1\n    .registers 2\n    const/4 v0, 0x0\n    return-object v0\n\2'
+    echo "$target_files" | while read -r file; do
+        perl -0777 -i -pe "s#$find_equals#$replace_equals#g" "$file"
+        perl -0777 -i -pe "s#$find_hashcode#$replace_hashcode#g" "$file"
+        perl -0777 -i -pe "s#$find_tostring#$replace_tostring#g" "$file"
+    done
+}
+
+remove_debug_info_files() {
+    local unpack_dir="$1"
+    if [[ ! -d "$unpack_dir" ]]; then return 1; fi
+    echo ""
+    local perl_command="find \"$unpack_dir\" -name \"*.smali\" -type f -exec perl -i -ne 'print unless /^\s*\\.(line|source|param)/' {} +"
+   
+        bash -c "$perl_command"
+    
+    return $?
+}
+
 apk_protection_patches() {
     local unpack_dir="$1"
     local sig_verifier_smali=$(find "$unpack_dir" -type f -name 'ApkSignatureVerifier.smali' | head -n 1)
@@ -454,46 +487,20 @@ EOF
     fi
 }
 
-remove_invoke_custom() {
+apply_lockout_patch() {
     local unpack_dir="$1"
-    if [[ ! -d "$unpack_dir" ]]; then
-        echo -e "${RED}    ERROR: Direktori '$unpack_dir' tidak ditemukan.${NC}" >&2
+    local limit_value="$2"
+    
+    local new_limit_hex=$(printf "0x%x" "$limit_value")
+    find "$unpack_dir" -type f -name "*.smali" -exec sed -i -E "s/(\.field private static final MAX_FAILED_ATTEMPTS_LOCKOUT_TIMED:I = )0x[0-9a-fA-F]+/\\1$new_limit_hex/g" {} + > /dev/null 2>&1
+    local patched_files_count=$(grep -l "MAX_FAILED_ATTEMPTS_LOCKOUT_TIMED:I = $new_limit_hex" "$unpack_dir" -r --include="*.smali" | wc -l)
+    if [ "$patched_files_count" -gt 0 ]; then
+        return 0
+    else
         return 1
     fi
-    local target_files
-    target_files=$(grep -Rl "invoke-custom" "$unpack_dir" --include="*.smali")
-    if [[ -z "$target_files" ]]; then
-        return 0
-    fi
-    local find_equals='(\.method[^\n]*? equals\(Ljava/lang/Object;\)Z)[\s\S]*?invoke-custom[\s\S]*?(\.end method)'
-    local replace_equals='\1\n    .registers 2\n    const/4 v0, 0x0\n    return v0\n\2'
-    local find_hashcode='(\.method[^\n]*? hashCode\(\)I)[\s\S]*?invoke-custom[\s\S]*?(\.end method)'
-    local replace_hashcode='\1\n    .registers 2\n    const/4 v0, 0x0\n    return v0\n\2'
-    local find_tostring='(\.method[^\n]*? toString\(\)Ljava/lang/String;)[\s\S]*?invoke-custom[\s\S]*?(\.end method)'
-    local replace_tostring='\1\n    .registers 2\n    const/4 v0, 0x0\n    return-object v0\n\2'
-    echo "$target_files" | while read -r file; do
-        perl -0777 -i -pe "s#$find_equals#$replace_equals#g" "$file"
-        perl -0777 -i -pe "s#$find_hashcode#$replace_hashcode#g" "$file"
-        perl -0777 -i -pe "s#$find_tostring#$replace_tostring#g" "$file"
-    done
 }
 
-# GANTI FUNGSI LAMA DENGAN VERSI EKSPERIMENTAL INI
-remove_debug_info_files() {
-    local unpack_dir="$1"
-    if [[ ! -d "$unpack_dir" ]]; then return 1; fi
-
-    echo ""
-    # Regex diperbarui untuk menyertakan .local (SANGAT BERISIKO GAGAL)
-    local perl_command="find \"$unpack_dir\" -name \"*.smali\" -type f -exec perl -i -ne 'print unless /^\s*\\.(line|source|param)/' {} +"
-   
-        bash -c "$perl_command"
-    
-    return $?
-}
-
-
-# GANTI FUNGSI LAMA DENGAN VERSI LENGKAP INI
 framework_menu() {
     local framework_name="framework.jar"
     local source_file="$sdcard_path/$framework_name"
@@ -502,7 +509,7 @@ framework_menu() {
     local pif_patched=false
     local apk_protection_patched=false
     local invoke_custom_patched=false
-    local debug_info_removed=false # Status baru
+    local debug_info_removed=false
 
     ensure_unpacked() {
         if [[ "$is_unpacked" = true ]]; then return 0; fi
@@ -578,7 +585,6 @@ framework_menu() {
                 fi
                 
                 repack_framework() {
-                    # Repack biasa tanpa flag -nd
                     apkeditor b -i ifvank -o framework-patched.apk > /dev/null 2>&1
                     [[ ! -f "framework-patched.apk" ]] && return 1
                     mv -f "framework-patched.apk" "$sdcard_path/${framework_name%.jar}-patched.jar"
@@ -606,6 +612,7 @@ framework_menu() {
         esac
     done
 }
+
 services_menu() {
     local services_name="services.jar"
     local source_file="$sdcard_path/$services_name"
@@ -613,6 +620,7 @@ services_menu() {
     local patches_applied=false
     local mock_location_patched=false
     local invoke_custom_patched=false
+    local lockout_limit_patched=false
 
     ensure_unpacked() {
         if [[ "$is_unpacked" = true ]]; then return 0; fi
@@ -643,8 +651,12 @@ services_menu() {
         local check2=""
         if [[ "$invoke_custom_patched" = true ]]; then check2=" ${GREEN}✓${NC}"; fi
         echo -e "  2. Remove Invoke-Custom$check2"
-        
-        echo "  3. Repack & Save Changes"
+
+        local check3=""
+        if [[ "$lockout_limit_patched" = true ]]; then check3=" ${GREEN}✓${NC}"; fi
+        echo -e "  3. Increase Lockscreen Attempts$check3"
+
+        echo "  4. Repack & Save Changes"
         echo "  0. Back (Discard Changes)"
         echo ""
         read -p "Select an option: " sub_choice
@@ -660,19 +672,37 @@ services_menu() {
                 echo -e "\n   ${GREEN}Patch 'Remove Invoke-Custom' applied.${NC}"; sleep 2
                 ;;
             3)
+                ensure_unpacked || { read -p "   Press Enter to continue..."; continue; }
+                
+                echo ""
+                read -p "Enter the maximum number of failed attempts (1-20): " max_attempts
+                if ! [[ "$max_attempts" =~ ^[0-9]+$ ]] || [ "$max_attempts" -lt 1 ] || [ "$max_attempts" -gt 20 ]; then
+                    echo -e "\n${RED}ERROR: Invalid input. Please enter a number between 1 and 20.${NC}"
+                    sleep 2
+                    continue
+                fi
+
+                if apply_lockout_patch "ifvank" "$max_attempts"; then
+                    patches_applied=true; lockout_limit_patched=true
+                    echo -e "\n   ${GREEN}Patch 'Increase Lockscreen Attempts' applied.${NC}"; sleep 2
+                else
+                    echo -e "\n   ${RED}Patch failed. Could not find the value to change.${NC}"; sleep 2
+                fi
+                ;;
+            4)
                 if [[ "$patches_applied" = false ]]; then
                     echo -e "\nNo patches were applied. Nothing to repack."; sleep 2; continue
                 fi
                 
-repack_services() {
-    apkeditor b -i ifvank -o services-patched.apk > /dev/null 2>&1
-    [[ ! -f "services-patched.apk" ]] && return 1
-    mv -f "services-patched.apk" "$sdcard_path/${services_name%.jar}-patched.jar"
-    return $?
-}
+                repack_services() {
+                    apkeditor b -i ifvank -o services-patched.apk > /dev/null 2>&1
+                    [[ ! -f "services-patched.apk" ]] && return 1
+                    mv -f "services-patched.apk" "$sdcard_path/${services_name%.jar}-patched.jar"
+                    return $?
+                }
                 echo ""
                 run_with_spinner "Repacking $services_name..." repack_services
-                if [[ $? -eq 0 ]]; then echo "[✓] services.jar patched successfully!"; echo -e "${GREEN}Output: $source_file${NC}"; else echo -e "${RED}ERROR: Failed to repack.${NC}"; fi
+                if [[ $? -eq 0 ]]; then echo "[✓] services.jar patched successfully!"; echo -e "${GREEN}Output: $sdcard_path/services-patched.jar${NC}"; else echo -e "${RED}ERROR: Failed to repack.${NC}"; fi
                 rm -rf "$services_name" ifvank services-patched.apk
                 read -p "   Press Enter to continue..."
                 return
@@ -686,6 +716,7 @@ repack_services() {
     done
 }
 
+
 patch_both() {
     clear
     echo "====================================="
@@ -695,7 +726,6 @@ patch_both() {
     local source_file_fw="$sdcard_path/$framework_name"
     echo ""
     rm -rf ifvank "$framework_name" "${framework_name%.jar}-patched.apk" *.bak > /dev/null 2>&1
-    rm -rf ifvank "$services_name" services-patched.apk *.bak > /dev/null 2>&1
     if [[ ! -f "$source_file_fw" ]]; then
         echo -e "${RED}ERROR: $framework_name not found. Skipping.${NC}"
     else
@@ -781,7 +811,6 @@ while true; do
             read -p "   Press [Enter] ..."
             ;;
         4)
-            # Loop for the sub-menu
             while true; do
                 clear
                 echo "=========================================="
@@ -821,7 +850,6 @@ while true; do
                         fi
                         ;;
                     0)
-                        # Breaks out of the sub-menu loop
                         break
                         ;;
                     *)
