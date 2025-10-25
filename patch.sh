@@ -464,16 +464,26 @@ apk_protection_patches() {
 mock_location_patch() {
     local unpack_dir="$1"
 
-    local file3=$(grep -lr '.method public noteOp(ILandroid/location/util/identity/CallerIdentity;)Z' "$unpack_dir" | grep 'SystemAppOpsHelper.smali$' | head -n 1)
+    local file3=$(grep -lr '.method public noteOp(ILandroid/location/util/identity/CallerIdentity;)Z' "$unpack_dir" | head -n 1)
+
     if [[ -n "$file3" ]]; then
-        local FIND_REGEX='(\.method public noteOp\(ILandroid\/location\/util\/identity\/CallerIdentity;\)Z[\s\S]*?\.param p2, "callerIdentity"[\s\S]*?;)'
-        read -r -d '' REPLACE_TEXT <<'EOF'
+
+    local FIND_REGEX='(\.method public noteOp\(ILandroid\/location\/util\/identity\/CallerIdentity;\)Z)[\s\S]*?(\.end method)'
+
+    read -r -d '' REPLACE_TEXT <<'EOF'
+
+    .locals 1
     const/4 v0, 0x1
     return v0
+
 EOF
-        export FIND_REGEX REPLACE_TEXT
-        perl -0777 -i -pe 's/$ENV{FIND_REGEX}/"$1\n" . $ENV{REPLACE_TEXT}/se' "$file3"
+
+    export FIND_REGEX REPLACE_TEXT
+
+    perl -0777 -i -pe 's/$ENV{FIND_REGEX}/$1 . $ENV{REPLACE_TEXT} . $2/se' "$file3"
     fi
+
+
 
     local file4=$(grep -lr 'Landroid/location/Location;->setIsFromMockProvider(Z)V' "$unpack_dir" | grep 'MockLocationProvider.smali$' | head -n 1)
     if [[ -n "$file4" ]]; then
@@ -483,7 +493,7 @@ EOF
     invoke-virtual {v0, v1}, Landroid/location/Location;->setIsFromMockProvider(Z)V
 EOF
         export FIND_REGEX REPLACE_TEXT
-        perl -0777 -i -pe 's/$ENV{FIND_REGEX}/$ENV{REPLACE_TEXT}/s' "$file4"
+        perl -0777 -i -pe 's#$ENV{FIND_REGEX}#$ENV{REPLACE_TEXT}#s' "$file4"
     fi
 }
 
