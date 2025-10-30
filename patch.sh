@@ -828,6 +828,7 @@ while true; do
                 echo "=========================================="
                 echo " 1. Android 13-14"
                 echo " 2. Android 15-16"
+                echo " 3. DSV - Strong 💪"
                 echo " 0. Main Menu"
                 echo ""
                 read -p "   Select an option: " sub_choice
@@ -848,6 +849,19 @@ while true; do
                         ;;
                     2)
                         dsv_path="./tool/dsv15"
+                        if [[ -f "$dsv_path" ]]; then
+                            chmod +x "$dsv_path" 
+                            bash "$dsv_path"
+                            echo ""
+                            read -p "   Done. Press [Enter] to return..."
+                        else
+                            echo ""
+                            echo -e "${RED}ERROR: Patcher file $dsv_path not found!${NC}"
+                            sleep 2
+                        fi
+                        ;;
+                    3)
+                        dsv_path="./tool/strongdsv"
                         if [[ -f "$dsv_path" ]]; then
                             chmod +x "$dsv_path" 
                             bash "$dsv_path"
