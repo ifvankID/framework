@@ -1,0 +1,198 @@
+#!/bin/bash
+
+# --- Configuration ---
+sdcard_path="/sdcard" 
+work_dir="$PWD"
+
+# --- Color Definitions ---
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# --- Helper Functions ---
+
+# Function to call APKEditor.jar
+apkeditor() {
+    local jarfile="$work_dir/tool/APKEditor.jar"
+    if [[ ! -f "$jarfile" ]]; then
+        echo -e "${RED}ERROR: APKEditor.jar not found in tool/ folder${NC}"
+        return 1
+    fi
+    # Run java command silently, output captured by run_with_spinner
+    java -Xmx4096M -jar "$jarfile" "$@" > /dev/null
+}
+
+# Function to run a command with a spinner and error logging
+run_with_spinner() {
+    local message="$1"
+    shift
+    local log_file=$(mktemp)
+    
+    "$@" &> "$log_file" &
+    local PID=$!
+    local spin='⣾⣽⣻⢿⡿⣟⣯⣷'
+    local i=0
+    echo -ne "[*] $message   "
+    while kill -0 $PID 2>/dev/null; do
+        i=$(( (i+1) % ${#spin} ))
+        printf "\b${spin:$i:1}"
+        sleep 0.1
+    done
+    wait $PID
+    if [ $? -eq 0 ]; then
+        printf "\b[${GREEN}✓${NC}]\n"
+        rm -f "$log_file"
+        return 0
+    else
+        printf "\b[${RED}✗${NC}]\n"
+        echo -e "${RED}--- ERROR LOG ---${NC}"
+        cat "$log_file"
+        echo -e "${RED}-----------------${NC}"
+        rm -f "$log_file"
+        return 1
+    fi
+}
+
+# Wrapper function to ensure patch commands always return 'success'
+# This prevents the spinner from failing if a 'find' command finds no matches
+run_patch_and_succeed() {
+    "$@"
+    return 0
+}
+
+# Function to clean up temporary files
+cleanup_workspace() {
+    rm -rf *_unpacked repacked.apk framework.jar services.jar *.bak *.tmp > /dev/null 2>&1
+}
+
+# --- Main Patch Functions (Original Patch Logic - Unchanged) ---
+
+apply_framework_patches() {
+    local unpack_dir="$1"
+    echo -e "${YELLOW}Applying patches to framework.jar...${NC}"
+
+    # authcreak: Izinkan instalasi tanpa signature (metode sederhana)
+    find "$unpack_dir" -type f -name "StrictJarVerifier.smali" -exec perl -0777 -i -pe 's/(\.method.*? verifyMessageDigest\(.*?\)Z)[\s\S]*?(\.end method)/$1\n    .locals 1\n    const\/4 v0, 0x1\n    return v0\n$2/g' {} +
+    
+    find "$unpack_dir" -type f -name "StrictJarVerifier.smali" -exec perl -0777 -i -pe 's/(\.method .*? verify\(.*?\)Z)[\s\S]*?(\.end method)/$1\n    .locals 1\n    const\/4 v0, 0x1\n    return v0\n$2/g' {} +
+    
+    find "$unpack_dir" -type f -name "*.smali" -exec perl -0777 -i -pe 's/(invoke-static \{[^\}]*\}, Ljava\/security\/MessageDigest;->isEqual\(\[B\[B\)Z\s*move-result (v\d+))/$1\n    const\/4 $2, 0x1/g' {} +
+
+    find "$unpack_dir" -type f \( -name "PackageParser\$SigningDetails.smali" -o -name "SigningDetails.smali" \) -exec perl -0777 -i -pe 's/(\.method.*?checkCapability.*?\(.*?\).*?Z)(.|\n)*?(\.end method)/$1\n    .locals 1\n    const\/4 v0, 0x1\n    return v0\n$3/g' {} +
+
+    find "$unpack_dir" -type f -name "AssetManager.smali" -exec perl -0777 -i -pe 's/(\.method.*?containsAllocatedTable.*?Z)[\s\S]*?(\.end method)/$1\n    .locals 1\n    const\/4 v0, 0x0\n    return v0\n$2/g' {} +
+    find "$unpack_dir" -type f -name "ApkSignatureVerifier.smali" -exec perl -0777 -i -pe 's/(\.method.*?getMinimumSignatureSchemeVersionForTargetSdk\(.*?\)I)[\s\S]*?(\.end method)/$1\n    .locals 1\n    const\/4 v0, 0x0\n    return v0\n$2/g' {} +
+    
+
+export DIGEST_CREAK_CODE='    iget v0, p0, Landroid/content/pm/ApplicationInfo;->flags:I
+    and-int/lit8 v1, v0, 0x1
+    if-eqz v1, :anggara
+    const/4 v0, 0x1
+    return v0
+    :anggara
+    const/16 v1, 0x80
+    and-int/2addr v0, v1
+    if-eqz v0, :arina
+    const/4 v0, 0x1
+    return v0
+    :arina'
+
+find "$unpack_dir" -type f -name "ApplicationInfo.smali" -exec \
+perl -0777 -i -pe 's#(\.method private greylist-max-o isPackageWhitelistedForHiddenApis\(\)Z\s+\.locals\s+)1#$1 . "2\n\n" . $ENV{DIGEST_CREAK_CODE} . "\n"#ge' {} +
+
+
+    find "$unpack_dir" -type f \( -name "PackageParser\$SigningDetails.smali" -o -name "SigningDetails.smali" \) -exec perl -0777 -i -pe 's/(\.method.*?signaturesMatchExactly.*?Z)[\s\S]*?(\.end method)/$1\n    .locals 1\n    const\/4 v0, 0x1\n    return v0\n$2/g' {} +
+
+    # --- PATCH DIKEMBALIKAN ---
+    find "$unpack_dir" -type f -name "StrictJarVerifier.smali" -exec perl -0777 -i -pe 's/(invoke-virtual \{)(v\d+), p\d+(\}, Lsun\/security\/pkcs\/PKCS7;->)verify\(\[B\)\[Lsun\/security\/pkcs\/SignerInfo;/$1$2$3getSignerInfos\(\)\[Lsun\/security\/pkcs\/SignerInfo;/g' {} +
+
+    find "$unpack_dir" -type f -name "NtConfigListServiceImpl.smali" -exec perl -0777 -i -pe 's/(\.method.*?isInstallingAppForbidden.*?Z)[\s\S]*?(\.end method)/$1\n    .locals 1\n    const\/4 v0, 0x0\n    return v0\n$2/g' {} +
+    find "$unpack_dir" -type f -name "NtConfigListServiceImpl.smali" -exec perl -0777 -i -pe 's/(\.method.*?isStartingAppForbidden.*?Z)[\s\S]*?(\.end method)/$1\n    .locals 1\n    const\/4 v0, 0x0\n    return v0\n$2/g' {} +
+
+    find "$unpack_dir" -type f \( -name "PackageParser\$SigningDetails.smali" -o -name "SigningDetails.smali" \) -exec perl -0777 -i -pe 's/(\.method.*?hasCommonAncestor.*?Z)[\s\S]*?(\.end method)/$1\n    .locals 1\n    const\/4 v0, 0x1\n    return v0\n$2/g' {} +
+    
+}
+
+apply_services_patches() {
+    local unpack_dir="$1"
+    echo -e "${YELLOW}Applying patches to services.jar...${NC}"
+
+    find "$unpack_dir" -type f -name "VerifyingSession.smali" -exec perl -0777 -i -pe 's/(\.method.*?isVerificationEnabled.*?Z)[\s\S]*?(\.end method)/$1\n    .locals 1\n    const\/4 v0, 0x0\n    return v0\n$2/g' {} +
+    find "$unpack_dir" -type f -name "KeySetManagerService.smali" -exec perl -0777 -i -pe 's/(\.method.*?shouldCheckUpgradeKeySetLocked.*?Z)[\s\S]*?(\.end method)/$1\n    .locals 1\n    const\/4 v0, 0x1\n    return v0\n$2/g' {} +
+    find "$unpack_dir" -type f -name "KeySetManagerService.smali" -exec perl -0777 -i -pe 's/(\.method .*? checkUpgradeKeySetLocked\(.*?\)Z)[\s\S]*?(\.end method)/$1\n    .locals 1\n    const\/4 v0, 0x1\n    return v0\n$2/g' {} +
+
+    find "$unpack_dir" -type f -name "ScanPackageUtils.smali" -exec perl -0777 -i -pe 's/(\.method.*?assertMinSignatureSchemeIsValid.*?V)[\s\S]*?(\.end method)/$1\n    .locals 0\n    return-void\n$2/g' {} +
+    find "$unpack_dir" -type f -name "PackageManagerServiceUtils.smali" -exec perl -0777 -i -pe 's/(\.method public static checkDowngrade.*?V)[\s\S]*?(\.end method)/$1\n    .locals 0\n    return-void\n$2/g' {} +
+}
+
+# --- Main Process Logic ---
+
+run_patch_cycle() {
+    local jar_name="$1"
+    local patch_function="$2"
+    local unpack_dir="${jar_name%.*}_unpacked"
+    
+    local source_file="$sdcard_path/$jar_name"
+    if [[ ! -f "$source_file" ]]; then
+        echo -e "[*] ${RED}${jar_name} not found. Skipping...${NC}"
+        return
+    fi
+    
+    any_file_found=true
+    cp "$source_file" .
+    
+    # 1. Unpack
+    if ! run_with_spinner "Unpacking $jar_name..." apkeditor d -i "$jar_name" -o "$unpack_dir"; then
+        echo -e "${RED}ERROR: Failed to unpack ${jar_name}.${NC}"
+        return 1
+    fi
+    
+    # 2. Apply Patches
+    if ! run_with_spinner "Patching $jar_name..." run_patch_and_succeed "$patch_function" "$unpack_dir"; then
+        echo -e "${RED}ERROR: Failed to apply patches to ${jar_name}.${NC}"
+        return 1
+    fi
+    
+    # 3. Repack
+    if ! run_with_spinner "Repacking $jar_name..." apkeditor b -i "$unpack_dir" -o "repacked.apk"; then
+        echo -e "${RED}ERROR: Failed to repack ${jar_name}.${NC}"
+        return 1
+    fi
+
+    local output_filename="$sdcard_path/${jar_name%.*}-patched.jar"
+    mv "repacked.apk" "$output_filename"
+    echo -e "Output: ${GREEN}$output_filename${NC}\n"
+    any_success=true
+    return 0
+}
+
+# --- Start Execution ---
+clear
+echo "==========================================="
+echo -e "      ${GREEN}Disable Signature Verification${NC}"
+echo "==========================================="
+echo ""
+
+cleanup_workspace
+
+any_success=false
+any_file_found=false 
+
+# Run the patch cycles
+run_patch_cycle "framework.jar" "apply_framework_patches" && \
+run_patch_cycle "services.jar" "apply_services_patches"
+
+# Final Status
+if [ "$any_success" = true ]; then
+    echo -e "\n${GREEN}'Disable Signature Verification - Strong' applied.${NC}"
+else
+    if [ "$any_file_found" = false ]; then
+        echo -e "  ${RED}✗ No .jar files found in $sdcard_path.${NC}"
+    else
+        echo -e "  ${RED}✗ An error occurred during the patching process. Check the log above.${NC}"
+    fi
+fi
+
+echo ""
+cleanup_workspace
