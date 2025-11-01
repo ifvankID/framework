@@ -119,8 +119,4 @@ if [ "$any_success" = true ]; then
     echo -e "\n  ${GREEN}'Disable Secure Flag' patch applied.${NC}"
 fi
 
-if [ "$any_file_found" = false ]; then
-    echo -e "  ${RED}✗${NC} No relevant JAR file found on $sdcard_path."
-fi
-
 echo ""
