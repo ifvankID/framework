@@ -1,0 +1,181 @@
+#!/bin/bash
+
+set -e
+
+work_dir="$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." &> /dev/null && pwd )"
+
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+unpack_dir="$1"
+
+if [[ -z "$unpack_dir" || ! -d "$unpack_dir" ]]; then
+    echo -e "${RED}ERROR: Direktori unpack '$unpack_dir' tidak valid.${NC}" >&2
+    exit 1
+fi
+
+expressions_fix() {
+    local var="$1"
+    local escaped_var
+    escaped_var=$(printf '%s\n' "$var" | sed 's/[\/&]/\\&/g')
+    escaped_var=$(printf '%s\n' "$escaped_var" | sed 's/\[/\\[/g' | sed 's/\]/\\]/g' | sed 's/\./\\./g' | sed 's/;/\\;/g')
+    echo "$escaped_var"
+}
+
+certificatechainPatch() {
+ certificatechainPatch="
+    .line $1
+    invoke-static {}, Lcom/android/internal/util/kaorios/ToolboxUtils;->KaoriosPropsEngineGetCertificateChain()V
+"
+}
+instrumentationPatch() {
+	local returnline=$(expr $2 + 1)
+	instrumentationPatch="    invoke-static {$1}, Lcom/android/internal/util/kaorios/ToolboxUtils;->KaoriosProps(Landroid/content/Context;)V
+
+    .line $returnline
+    "
+}
+
+getKeyEntryPatch() {
+    getKeyEntryPatch="
+    .line $1
+    invoke-static {v0}, Lcom/android/internal/util/kaorios/ToolboxUtils;->KaoriosKeybox(Landroid/system/keystore2/KeyEntryResponse;)Landroid/system/keystore2/KeyEntryResponse;
+
+    move-result-object v0
+"
+}
+
+hasSystemFeaturePatch() {
+    local reg="$1"
+    hasSystemFeaturePatch="
+    invoke-static {${reg}, p1}, Lcom/android/internal/util/kaorios/ToolboxUtils;->KaoriosAttestationBL(ZLjava/lang/String;)Z
+
+    move-result ${reg}
+"
+}
+
+hasSystemFeature2ArgsPatch() {
+    local reg="$1"
+    hasSystemFeature2ArgsPatch="
+    invoke-static {p1, p2, ${reg}}, Lcom/android/internal/util/kaorios/ToolboxUtils;->KaoriosFeatures(Ljava/lang/String;IZ)Z
+
+    move-result ${reg}
+"
+}
+
+keystorespiclassfile=$(find "$unpack_dir"/ -name 'AndroidKeyStoreSpi.smali' -printf '%P\n' | head -n 1)
+instrumentationsmali=$(find "$unpack_dir"/ -name "Instrumentation.smali" -printf '%P\n' | head -n 1)
+keystore2classfile=$(find "$unpack_dir"/ -name 'KeyStore2.smali' -printf '%P\n' | head -n 1)
+apppkgmgrclassfile=$(find "$unpack_dir"/ -name 'ApplicationPackageManager.smali' -printf '%P\n' | head -n 1)
+
+
+if [[ -z "$keystorespiclassfile" || -z "$instrumentationsmali" || -z "$keystore2classfile" || -z "$apppkgmgrclassfile" ]]; then
+    echo -e "${RED}    ERROR: PIF patch failed. Required files not found.${NC}" >&2
+    exit 1
+fi
+
+local_keystore_path="$unpack_dir/$keystorespiclassfile"
+local_inst_path="$unpack_dir/$instrumentationsmali"
+local_keystore2_path="$unpack_dir/$keystore2classfile"
+local_apppkgmgr_path="$unpack_dir/$apppkgmgrclassfile"
+
+engineGetCertMethod=$(expressions_fix "$(grep 'engineGetCertificateChain(' "$local_keystore_path" | head -n 1)")
+newAppMethod1=$(expressions_fix "$(grep 'newApplication(Ljava/lang/ClassLoader;' "$local_inst_path" | head -n 1)")
+newAppMethod2=$(expressions_fix "$(grep 'newApplication(Ljava/lang/Class;' "$local_inst_path" | head -n 1)")
+
+hasSystemFeatureMethodGrep=$(grep '\.method public whitelist hasSystemFeature(Ljava/lang/String;)Z' "$local_apppkgmgr_path" | head -n 1 || true)
+hasSystemFeature2ArgsMethodGrep=$(grep '\.method public whitelist hasSystemFeature(Ljava/lang/String;I)Z' "$local_apppkgmgr_path" | head -n 1 || true)
+
+
+sed -n "/^${engineGetCertMethod}/,/^\.end method/p" "$local_keystore_path" > "$work_dir/tmp_keystore"
+sed -i "/^${engineGetCertMethod}/,/^\.end method/d" "$local_keystore_path"
+
+sed -n "/^${newAppMethod1}/,/^\.end method/p" "$local_inst_path" > "$work_dir/inst1"
+sed -i "/^${newAppMethod1}/,/^\.end method/d" "$local_inst_path"
+sed -n "/^${newAppMethod2}/,/^\.end method/p" "$local_inst_path" > "$work_dir/inst2"
+sed -i "/^${newAppMethod2}/,/^\.end method/d" "$local_inst_path"
+
+sed -i '
+/\.method .* getKeyEntry(Landroid\/system\/keystore2\/KeyDescriptor;)Landroid\/system\/keystore2\/KeyEntryResponse;/,/\.end method/ {
+    /    check-cast v0, Landroid\/system\/keystore2\/KeyEntryResponse;/a \
+\
+    invoke-static {v0}, Lcom\/android\/internal\/util\/kaorios\/ToolboxUtils;->KaoriosKeybox(Landroid\/system\/keystore2\/KeyEntryResponse;)Landroid\/system\/keystore2\/KeyEntryResponse;\
+\
+    move-result-object v0
+}' "$local_keystore2_path"
+
+if [ $? -ne 0 ]; then
+    echo -e "${RED}    ERROR: Failed to patch KeyStore2.smali.${NC}" >&2
+    exit 1
+fi
+
+if [[ -n "$hasSystemFeatureMethodGrep" ]]; then
+    hasSystemFeatureMethod=$(expressions_fix "$hasSystemFeatureMethodGrep")
+    
+    sed -n "/^${hasSystemFeatureMethod}/,/^\.end method/p" "$local_apppkgmgr_path" > "$work_dir/tmp_apppkgmgr"
+    sed -i "/^${hasSystemFeatureMethod}/,/^\.end method/d" "$local_apppkgmgr_path"
+
+    pkgmgr_insert=$(expr $(wc -l < "$work_dir/tmp_apppkgmgr") - 2)
+    
+    return_reg_1arg=$(grep -E "return v[0-9]+" "$work_dir/tmp_apppkgmgr" | tail -n 1 | awk '{print $2}')
+    
+    if [[ -z "$return_reg_1arg" ]]; then
+         echo -e "${RED}    ERROR: Gagal patch hasSystemFeature(String). Tidak menemukan register kembali.${NC}" >&2
+         exit 1
+    fi
+    
+    hasSystemFeaturePatch "$return_reg_1arg"
+    echo "$hasSystemFeaturePatch" | sed -i "${pkgmgr_insert}r /dev/stdin" "$work_dir/tmp_apppkgmgr"
+else
+    touch "$work_dir/tmp_apppkgmgr"
+fi
+
+if [[ -n "$hasSystemFeature2ArgsMethodGrep" ]]; then
+    hasSystemFeature2ArgsMethod=$(expressions_fix "$hasSystemFeature2ArgsMethodGrep")
+    
+    sed -n "/^${hasSystemFeature2ArgsMethod}/,/^\.end method/p" "$local_apppkgmgr_path" > "$work_dir/tmp_apppkgmgr_2args"
+    sed -i "/^${hasSystemFeature2ArgsMethod}/,/^\.end method/d" "$local_apppkgmgr_path"
+
+    pkgmgr_2args_insert=$(expr $(wc -l < "$work_dir/tmp_apppkgmgr_2args") - 2)
+    
+    return_reg_2arg=$(grep -E "return v[0-9]+" "$work_dir/tmp_apppkgmgr_2args" | tail -n 1 | awk '{print $2}')
+
+    if [[ -z "$return_reg_2arg" ]]; then
+        echo -e "${RED}    ERROR: Gagal patch hasSystemFeature(String, int). Tidak menemukan register kembali.${NC}" >&2
+        exit 1
+    fi
+    
+    hasSystemFeature2ArgsPatch "$return_reg_2arg" # Panggil dengan register
+    echo "$hasSystemFeature2ArgsPatch" | sed -i "${pkgmgr_2args_insert}r /dev/stdin" "$work_dir/tmp_apppkgmgr_2args"
+else
+    touch "$work_dir/tmp_apppkgmgr_2args"
+fi
+
+
+inst1_insert=$(expr $(wc -l < "$work_dir/inst1") - 2)
+instreg=$(grep "Landroid/app/Application;->attach(Landroid/content/Context;)V" "$work_dir/inst1" | awk '{print $3}' | sed 's/},//')
+instline=$(expr $(grep -r ".line" "$work_dir/inst1" | tail -n 1 | awk '{print $2}') + 1)
+instrumentationPatch "$instreg" "$instline"
+echo "$instrumentationPatch" | sed -i "${inst1_insert}r /dev/stdin" "$work_dir/inst1"
+
+inst2_insert=$(expr $(wc -l < "$work_dir/inst2") - 2)
+instreg=$(grep "Landroid/app/Application;->attach(Landroid/content/Context;)V" "$work_dir/inst2" | awk '{print $3}' | sed 's/},//')
+instline=$(expr $(grep -r ".line" "$work_dir/inst2" | tail -n 1 | awk '{print $2}') + 1)
+instrumentationPatch "$instreg" "$instline"
+echo "$instrumentationPatch" | sed -i "${inst2_insert}r /dev/stdin" "$work_dir/inst2"
+
+kstoreline=$(expr $(grep -r ".line" "$work_dir/tmp_keystore" | head -n 1 | awk '{print $2}') - 2)
+certificatechainPatch "$kstoreline"
+echo "$certificatechainPatch" | sed -i '4r /dev/stdin' "$work_dir/tmp_keystore"
+
+
+cat "$work_dir/inst1" >> "$local_inst_path"
+cat "$work_dir/inst2" >> "$local_inst_path"
+cat "$work_dir/tmp_keystore" >> "$local_keystore_path"
+cat "$work_dir/tmp_apppkgmgr" >> "$local_apppkgmgr_path"
+cat "$work_dir/tmp_apppkgmgr_2args" >> "$local_apppkgmgr_path"
+
+rm -rf "$work_dir/inst1" "$work_dir/inst2" "$work_dir/tmp_keystore" "$work_dir/tmp_apppkgmgr" "$work_dir/tmp_apppkgmgr_2args"
+
+exit 0
