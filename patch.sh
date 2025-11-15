@@ -174,19 +174,20 @@ pif_submenu() {
 
     while true; do
         clear
-        echo "====================================="
+        echo "===================================="
         echo -e "${GREEN}      Play Integrity Fix Menu${NC}"
-        echo "====================================="
+        echo "===================================="
         echo ""
         
         echo "  1. PIF Android 13-15"
         echo "  2. PIF Android 16"
-        echo "  3. Play Integrity Fix By Danda"
+        echo "  3. PIF A13+ Kaorios Toolbox"
+        echo "  4. PlF A13+ By Danda "
         echo "  0. Back to Framework Menu"
         echo ""
         read -p "Select an option: " sub_choice
 
-        if [[ "$new_pif_patched_status" = true && ( "$sub_choice" = "1" || "$sub_choice" = "2" || "$sub_choice" = "3" ) ]]; then
+        if [[ "$new_pif_patched_status" = true && ( "$sub_choice" = "1" || "$sub_choice" = "2" || "$sub_choice" = "3" || "$sub_choice" = "4" ) ]]; then
             echo -e "\n   ${GREEN}PIF patch is already applied. No need to patch again.${NC}"; sleep 2
             continue 
         fi
@@ -240,7 +241,34 @@ pif_submenu() {
                     sleep 2
                 fi
                 ;;
+
             3)
+                "$ensure_unpacked_func_name" || { read -p "   Unpack failed. Press Enter..."; continue; }
+                parent_is_unpacked=true
+
+                # PASTIKAN NAMA FILE INI BENAR
+                local script_path="tool/pifkaorios"
+                
+                if [[ ! -f "$script_path" ]]; then
+                    echo -e "\n   ${RED}ERROR: $script_path not found!${NC}"; sleep 2
+                    continue
+                fi
+                
+                chmod +x "$script_path" 
+                run_with_spinner "Applying PIF Kaorios Toolbox..." bash "$script_path" "$unpack_dir"
+
+                if [[ $? -eq 0 ]]; then
+                    new_pif_patched_status=true
+                    echo -e "\n   ${GREEN}Patch 'PIF Kaorios Toolbox' applied..${NC}"
+                    echo "   Returning to framework menu..."
+                    sleep 2
+                    return 6 # <--- MODIFIKASI 1: Diubah dari 0 menjadi 6
+                else
+                    echo -e "\n   ${RED}Patch 'PIF Kaorios Toolbox' failed.${NC}"
+                    sleep 2
+                fi
+                ;;
+            4)
                 "$ensure_unpacked_func_name" || { read -p "   Unpack failed. Press Enter..."; continue; }
                 parent_is_unpacked=true
 
@@ -288,9 +316,9 @@ framework_menu() {
     local pif_patched=false
     local apk_protection_patched=false
     local invoke_custom_patched=false
-    local debug_info_removed=false
-    
+    local debug_info_removed=false 
     local pif_danda_mode=false
+    local pif_kaorios_mode=false
 
     ensure_unpacked_fw() {
         if [[ "$is_unpacked" = true ]]; then return 0; fi
@@ -336,7 +364,7 @@ framework_menu() {
         if [[ "$debug_info_removed" = true ]]; then check_debug_info=" ${GREEN}✓${NC}"; fi
         echo -e "  4. Remove Debug Info$check_debug_info"
 
-        echo "  5. Repack & Save Changes"
+        echo "  5. Save & Repack"
         echo "  0. Back (Discard Changes)"
         echo ""
         read -p "Select an option: " sub_choice
@@ -353,6 +381,11 @@ framework_menu() {
                     patches_applied=true
                     pif_patched=true
                     pif_danda_mode=true
+                    is_unpacked=true
+                elif [[ $submenu_result -eq 6 ]]; then
+                    patches_applied=true
+                    pif_patched=true
+                    pif_kaorios_mode=true
                     is_unpacked=true
                 elif [[ $submenu_result -eq 2 ]]; then 
                     is_unpacked=true 
@@ -393,7 +426,7 @@ framework_menu() {
                     apkeditor b -i "$unpack_dir" -o "$temp_repack_apk" > /dev/null 2>&1
                     [[ ! -f "$temp_repack_apk" ]] && echo -e "${RED}ERROR: apkeditor b failed.${NC}" && return 1
 
-                    if [[ "$pif_danda_mode" = true ]]; then
+                    if [[ "$pif_danda_mode" = true || "$pif_kaorios_mode" = true ]]; then
                         
                         local temp_repack_dir="temp_repack_work"
                         rm -rf "$temp_repack_dir"
@@ -408,10 +441,17 @@ framework_menu() {
                         local patchclass_num=$(expr $last_num + 1)
                         local target_dex_name="classes${patchclass_num}.dex"
                         
-                        local pif_source_file="$work_dir/PIF/danda.dex"
-                        if [[ ! -f "$pif_source_file" ]]; then
-                             echo -e "${RED}ERROR: PIF/danda.dex not found during repack!${NC}"; rm -rf "$temp_repack_dir" "$temp_repack_apk"; return 1
+                        local pif_source_file=""
+                        if [[ "$pif_danda_mode" = true ]]; then
+                            pif_source_file="$work_dir/PIF/danda.dex"
+                        elif [[ "$pif_kaorios_mode" = true ]]; then
+                            pif_source_file="$work_dir/PIF/kaorios.dex" # Asumsi nama file dex-nya
                         fi
+                        
+                        if [[ -z "$pif_source_file" || ! -f "$pif_source_file" ]]; then
+                             echo -e "${RED}ERROR: PIF dex file ($pif_source_file) not found during repack!${NC}"; rm -rf "$temp_repack_dir" "$temp_repack_apk"; return 1
+                        fi
+
                         cp "$pif_source_file" "$temp_repack_dir/$target_dex_name"
                         
                         (cd "$temp_repack_dir" && zip -qr0 -t 07302003 "$work_dir/$final_jar_file" ./*)
@@ -507,7 +547,7 @@ services_menu() {
         if [[ "$lockout_limit_patched" = true ]]; then check3=" ${GREEN}✓${NC}"; fi
         echo -e "  3. Increase Lockscreen Attempts$check3"
 
-        echo "  4. Repack & Save Changes"
+        echo "  4. Save & Repack"
         echo "  0. Back (Discard Changes)"
         echo ""
         read -p "Select an option: " sub_choice
@@ -607,7 +647,7 @@ while true; do
                 echo "=========================================="
                 echo " 1. Android 13-14"
                 echo " 2. Android 15-16"
-                echo " 3. DSV - Strong 💪"
+                echo " 3. DSV A13+ (Strong) 💪"
                 echo " 0. Main Menu"
                 echo ""
                 read -p "   Select an option: " sub_choice
