@@ -50,9 +50,14 @@ cleanup_workspace() {
 apply_services_patches() {
     local unpack_dir="$1"
     
+    # Patch 1: isSecureLocked
     find "$unpack_dir" -type f -name "*.smali" -exec perl -0777 -i -pe 's/(\.method.*?isSecureLocked\(\)Z)[\s\S]*?(\.end method)/$1\n    .locals 1\n    const\/4 v0, 0x0\n    return v0\n$2/g' {} +
     
+    # Patch 2: notifyScreenshotListeners
     find "$unpack_dir" -type f -name "*.smali" -exec perl -0777 -i -pe 's/(\.method public notifyScreenshotListeners\(I\)Ljava\/util\/List;)[\s\S]*?(\.end method)/$1\n    .locals 1\n    const\/4 v0, 0x0\n    return-object v0\n$2/g' {} +
+
+    # Patch 3 (BARU): getScreenCaptureDisabled
+    find "$unpack_dir" -type f -name "*.smali" -exec perl -0777 -i -pe 's/(\.method public getScreenCaptureDisabled\(Landroid\/content\/ComponentName;IZ\)Z)[\s\S]*?(\.end method)/$1\n    .locals 1\n    const\/4 v0, 0x0\n    return v0\n$2/g' {} +
 }
 
 apply_miui_services_patches() {
